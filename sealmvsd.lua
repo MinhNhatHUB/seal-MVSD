@@ -177,6 +177,10 @@ local S = {
     TriggerOn = false, TriggerCD = 0.03, TriggerLastShot = 0,
     AimbotOn = false, AimbotFOV = 200, AimbotShowFOV = false,
     AimbotSmoothness = 0.35,
+    FarmRoundStart = 0,
+    FarmLastMatchState = false,
+    FarmTeleported = false,
+    CachedKnife = nil,
 }
 
 local AnchorRelease = false
@@ -186,13 +190,19 @@ local function Notify(m) pcall(function() Hub:Notify({ Title = "SealDev", Conten
 dbg("loaded")
 
 local function FindKnife()
+    if S.CachedKnife and S.CachedKnife.Parent then return S.CachedKnife end
     for _, c in ipairs({ MyPlayer:FindFirstChildOfClass("Backpack"), MyPlayer.Character }) do
         if c then
             for _, t in ipairs(c:GetChildren()) do
-                if t:IsA("Tool") and t:GetAttribute("EquipAnimation") == "Knife_Equip" then return t end
+                if t:IsA("Tool") and t:GetAttribute("EquipAnimation") == "Knife_Equip" then
+                    S.CachedKnife = t
+                    return t
+                end
             end
         end
     end
+    S.CachedKnife = nil
+    return nil
 end
 
 local function EquipTool(t)
@@ -335,61 +345,51 @@ local function simulateMouseClick()
     end)
 end
 
-
-
-local TriggerMouse = MyPlayer:GetMouse()
-local TriggerClicked = false
-local TriggerInitialized = false
-
-local function initTriggerbot()
-    if TriggerInitialized then return end
-    TriggerInitialized = true
-
-    UserInputServiceRef.InputBegan:Connect(function(Input, GameProcessedEvent)
-        if GameProcessedEvent then return end
-        if Input.KeyCode == Enum.KeyCode.E then
-            S.TriggerOn = not S.TriggerOn
-            Notify(S.TriggerOn and "TriggerBot ON (E)" or "TriggerBot OFF (E)")
-        end
-    end)
-
-    RunServiceRef.RenderStepped:Connect(function()
-        if not S.TriggerOn or S.GuiHidden then
-            if TriggerClicked then
-                pcall(function() TriggerMouse:__unlockMouse() end)
-                TriggerClicked = false
+local triggerBusy = false
+task.spawn(function()
+    while task.wait(0.03) do
+        if S.TriggerOn and not S.GuiHidden and S.InMatch and not triggerBusy then
+            if isFirstPerson() then
+                local now = tick()
+                if now - S.TriggerLastShot >= S.TriggerCD then
+                    local cam = WorkspaceService.CurrentCamera
+                    local myChar = MyPlayer.Character
+                    if cam and myChar then
+                        local myHead = myChar:FindFirstChild("Head")
+                        local tool = myChar:FindFirstChildOfClass("Tool")
+                        if myHead and tool and tool:FindFirstChild("Fire") and tool:FindFirstChild("Reload") then
+                            local mp = UserInputServiceRef:GetMouseLocation()
+                            local ray = cam:ViewportPointToRay(mp.X, mp.Y)
+                            local rp = RaycastParams.new()
+                            rp.FilterType = Enum.RaycastFilterType.Exclude
+                            rp.FilterDescendantsInstances = { myChar }
+                            rp.IgnoreWater = true
+                            local result = WorkspaceService:Raycast(ray.Origin, ray.Direction * 3000, rp)
+                            if result then
+                                local hitChar = result.Instance:FindFirstAncestorOfClass("Model")
+                                if hitChar then
+                                    local hitPlayer = PlayersService:GetPlayerFromCharacter(hitChar)
+                                    if hitPlayer and hitPlayer ~= MyPlayer and not isTeammate(hitPlayer) then
+                                        local hp = hitChar:FindFirstChildOfClass("Humanoid")
+                                        if hp and hp.Health > 0 then
+                                            triggerBusy = true
+                                            simulateMouseClick()
+                                            S.TriggerLastShot = now
+                                            task.delay(0.02, function() triggerBusy = false end)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
             end
-            return
         end
-
-        local target = TriggerMouse.Target
-        if not target then return end
-
-        local parent = target.Parent
-        local humanoid = parent and (parent:FindFirstChildOfClass("Humanoid") or (parent.Parent and parent.Parent:FindFirstChildOfClass("Humanoid")))
-        local ownerModel = humanoid and humanoid.Parent
-
-        if humanoid and ownerModel and ownerModel.Name ~= MyPlayer.Name and humanoid.Health >= 1 then
-            local ownerPlayer = PlayersService:GetPlayerFromCharacter(ownerModel)
-            if ownerPlayer and not isTeammate(ownerPlayer) then
-                pcall(function()
-                    TriggerMouse:__unlockMouse()
-                    TriggerMouse.Button1Down:Fire()
-                end)
-                pcall(function() mouse1press() end)
-                TriggerClicked = false
-            end
-        elseif not TriggerClicked then
-            pcall(function() mouse1release() end)
-            TriggerClicked = true
-        end
-    end)
-end
-
-initTriggerbot()
-
+    end
+end)
 
 MyPlayer.CharacterAdded:Connect(function(body)
+    S.CachedKnife = nil
     if not AnchorRelease then return end
     local root = body:WaitForChild("HumanoidRootPart", 5)
     local hp = body:WaitForChild("Humanoid", 5)
@@ -1056,6 +1056,7 @@ KillPage:Toggle({
                 while KnifeLoopOn do
                     if S.InMatch and not S.GuiHidden then
                         EquipTool(FindKnife())
+                        local anyKilled = false
                         for _, o in ipairs(S.EnemyList) do
                             if not isTeammate(o) then
                                 local c = o.Character
@@ -1063,13 +1064,17 @@ KillPage:Toggle({
                                     local h = c:FindFirstChildOfClass("Humanoid")
                                     if h and h.Health > 0 then
                                         ThrowKnife(c)
-                                        task.wait(0.001)
+                                        anyKilled = true
                                     end
                                 end
                             end
                         end
+                        if not anyKilled then
+                            task.wait(0.05)
+                        end
+                    else
+                        task.wait(0.1)
                     end
-                    task.wait(0.001)
                 end
             end)
         end
@@ -1143,15 +1148,23 @@ end
 
 local FarmPage = Hub:Tab({ Title = "Farm", Icon = "wheat", Locked = false })
 FarmPage:Toggle({
-    Title = "Auto Farm", Desc = "Pad + walk + auto-kill + dance + anti-afk", Default = false,
+    Title = "Auto Farm", Desc = "Kills every 0.01s + tp 600 back", Default = false,
     Callback = function(v)
         S.FarmOn = v
         if v then
-            currentFarmPad = nil; S.LastDance = 0
-            enableAntiAfk(); Notify("Farm ON + Anti-AFK")
+            currentFarmPad = nil
+            S.LastDance = 0
+            S.FarmRoundStart = 0
+            S.FarmLastMatchState = false
+            S.FarmTeleported = false
+            S.CachedKnife = nil
+            enableAntiAfk()
+            Notify("Farm ON: kill every 0.01s + tp 600")
         else
-            Notify("Farm OFF"); currentFarmPad = nil
-            stopDance(); disableAntiAfk()
+            Notify("Farm OFF")
+            currentFarmPad = nil
+            stopDance()
+            disableAntiAfk()
         end
     end,
 })
@@ -1160,13 +1173,49 @@ FarmPage:Slider({
     Value = { Min = 16, Max = 100, Default = 40 },
     Callback = function(v) S.FarmWalkSpeed = v end,
 })
+
 task.spawn(function()
-    while task.wait(0.15) do
+    while task.wait(0.01) do
         if S.FarmOn and not S.GuiHidden then
-            if S.InMatch then
+            local inMatchNow = S.InMatch
+
+            if inMatchNow and not S.FarmLastMatchState then
+                S.FarmRoundStart = tick()
+                S.FarmTeleported = false
+                S.CachedKnife = nil
+            end
+            S.FarmLastMatchState = inMatchNow
+
+            if inMatchNow then
                 currentFarmPad = nil
-                if tick() - S.LastDance >= 2 then playDance(); S.LastDance = tick() end
-                EquipTool(FindKnife())
+
+                if tick() - S.LastDance >= 5 then
+                    playDance()
+                    S.LastDance = tick()
+                end
+
+                if not S.FarmTeleported then
+                    local hrp = MyPlayer.Character and MyPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local backDir = -hrp.CFrame.LookVector
+                        local rayParams = RaycastParams.new()
+                        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                        rayParams.FilterDescendantsInstances = { MyPlayer.Character }
+                        rayParams.IgnoreWater = true
+                        local result = WorkspaceService:Raycast(hrp.Position, backDir * 600, rayParams)
+                        local dist = 600
+                        if result then
+                            dist = math.max(5, (result.Position - hrp.Position).Magnitude - 3)
+                        end
+                        hrp.CFrame = hrp.CFrame + backDir * dist
+                    end
+                    S.FarmTeleported = true
+                end
+
+                if not S.CachedKnife or not S.CachedKnife.Parent then
+                    S.CachedKnife = FindKnife()
+                end
+                EquipTool(S.CachedKnife)
                 for _, o in ipairs(S.EnemyList) do
                     if not isTeammate(o) then
                         local c = o.Character
@@ -1174,7 +1223,6 @@ task.spawn(function()
                             local h = c:FindFirstChildOfClass("Humanoid")
                             if h and h.Health > 0 then
                                 ThrowKnife(c)
-                                task.wait(0.001)
                             end
                         end
                     end
@@ -1189,8 +1237,9 @@ task.spawn(function()
         end
     end
 end)
+
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(1) do
         if S.FarmOn and S.InMatch and not S.GuiHidden then
             if not S.DanceTrack or not S.DanceTrack.IsPlaying then playDance() end
         end
@@ -1427,11 +1476,11 @@ AimbotPage:Toggle({
 AimbotPage:Section({ Title = "TriggerBot" })
 AimbotPage:Toggle({
     Title = "TriggerBot",
-    Desc = "Press E to toggle. Uses mouse.Target hit detection.",
+    Desc = "First-person only. Simulates real mouse click when crosshair is on enemy",
     Default = false,
     Callback = function(v)
         S.TriggerOn = v
-        Notify(v and "TriggerBot ON" or "TriggerBot OFF")
+        Notify(v and "TriggerBot ON (first-person)" or "TriggerBot OFF")
     end,
 })
 AimbotPage:Slider({
@@ -1469,238 +1518,76 @@ MiscPage:Slider({
 
 local antiLagConnection = nil
 local antiLagActive = false
-local antiLagSeen = setmetatable({}, { __mode = "k" })
-local antiLagTracked = setmetatable({}, { __mode = "k" })
+local antiLagProcessed = setmetatable({}, { __mode = "k" })
 
-local SHOT_NAME_HINTS = {
-    "muzzle", "flash", "shot", "fire", "gun", "bullet", "impact",
-    "hit", "spark", "shell", "casing", "trail", "beam", "tracer"
+local KNIFE_NAMES = {
+    "knife", "thrownknife", "projectile", "dagger", "throw",
+    "cleaver", "tomahawk", "shuriken", "snowball", "arrow",
+    "spear", "axe", "hatchet", "kunai", "shank", "blade"
+}
+local GUN_EFFECT_NAMES = {
+    "muzzle", "flash", "muzzleflash", "bullet", "tracer",
+    "gun", "revolver", "pistol", "shot", "impact", "hit",
+    "beam", "ray", "casing", "shell"
 }
 
-local KNIFE_NAME_HINTS = {
-    "knife", "dagger", "blade", "thrown", "throw", "projectile",
-    "cleaver", "tomahawk", "shuriken", "kunai", "shank"
-}
+local function lower(s) return string.lower(s) end
 
-local function nameHasHint(n, hints)
-    for i = 1, #hints do
-        if string.find(n, hints[i], 1, true) then return true end
+local function isGunEffectByName(name)
+    name = lower(name)
+    for i = 1, #GUN_EFFECT_NAMES do
+        if string.find(name, GUN_EFFECT_NAMES[i], 1, true) then return true end
     end
     return false
 end
 
-local function isShotEffect(obj)
-    if not obj then return false end
-    if obj:GetAttribute("IsBullet") == true
-       or obj:GetAttribute("BulletOwner") ~= nil
-       or obj:GetAttribute("ShotBy") ~= nil then
-        return true
+local function isKnife(inst)
+    if not inst or not inst.Parent then return false end
+    local name = lower(inst.Name)
+    if isGunEffectByName(name) then return false end
+    for i = 1, #KNIFE_NAMES do
+        if string.find(name, KNIFE_NAMES[i], 1, true) then return true end
     end
-    local n = string.lower(obj.Name)
-    if nameHasHint(n, SHOT_NAME_HINTS) then return true end
-    local p = obj.Parent
-    if p then
-        local pn = string.lower(p.Name)
-        if nameHasHint(pn, SHOT_NAME_HINTS) then return true end
-        local pp = p.Parent
-        if pp then
-            local ppn = string.lower(pp.Name)
-            if nameHasHint(ppn, SHOT_NAME_HINTS) then return true end
-        end
-    end
+    if inst:GetAttribute("IsKnife") == true then return true end
+    if inst:GetAttribute("ProjectileOwner") ~= nil then return true end
     return false
 end
 
-local function isInsideCharacterOrToolOrBackpack(obj)
-    if not obj then return false end
-    local p = obj
-    while p do
-        if p:IsA("Tool") then return true end
-        if p:IsA("Accessory") then return true end
-        if p:IsA("Model") and PlayersService:GetPlayerFromCharacter(p) then return true end
-        if p:IsA("Model") and p:FindFirstChildOfClass("Humanoid") then return true end
-        if p == MyPlayer then return true end
-        p = p.Parent
-    end
-    return false
-end
-
-local function isCharacterPart(obj)
-    if not obj then return false end
-    if obj:IsA("Accessory") or obj:IsA("CharacterMesh") or obj:IsA("BodyColors")
-       or obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("Decal")
-       or obj:IsA("Humanoid") or obj:IsA("Animator") then
-        return true
-    end
-    return false
-end
-
-local function hasKnifeAttribute(obj)
-    if not obj then return false end
-    if obj:GetAttribute("IsKnife") == true then return true end
-    if obj:GetAttribute("ProjectileOwner") ~= nil then return true end
-    if obj:GetAttribute("KnifeOwner") ~= nil then return true end
-    if obj:GetAttribute("ThrownBy") ~= nil then return true end
-    return false
-end
-
-local function hasKnifeName(obj)
-    if not obj then return false end
-    local n = string.lower(obj.Name)
-    return nameHasHint(n, KNIFE_NAME_HINTS)
-end
-
-local function isKnifeObject(obj)
-    if not obj then return false end
-    if not obj.Parent then return false end
-    if obj:IsA("Tool") then return false end
-    if isShotEffect(obj) then return false end
-    if isInsideCharacterOrToolOrBackpack(obj) then return false end
-    if isCharacterPart(obj) then return false end
-    if obj:IsA("Sound") or obj:IsA("Folder") or obj:IsA("Configuration")
-       or obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")
-       or obj:IsA("BindableEvent") or obj:IsA("BindableFunction")
-       or obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript")
-       or obj:IsA("Attachment") or obj:IsA("Motor6D")
-       or obj:IsA("Weld") or obj:IsA("WeldConstraint") or obj:IsA("JointInstance") then
-        return false
-    end
-    if not (obj:IsA("BasePart") or obj:IsA("Model") or obj:IsA("MeshPart")
-            or obj:IsA("UnionOperation") or obj:IsA("Part")) then
-        return false
-    end
-    if hasKnifeAttribute(obj) then return true end
-    if hasKnifeName(obj) then return true end
-    if obj:IsA("BasePart") then
-        local p = obj.Parent
-        if p and (p:IsA("Model") or p:IsA("Folder")) then
-            if hasKnifeName(p) then return true end
-            for _, c in ipairs(p:GetChildren()) do
-                if c:IsA("BasePart") and (string.lower(c.Name) == "handle") then return true end
-            end
-        end
-    end
-    if obj:IsA("Model") then
-        local pp = obj.PrimaryPart
-        if pp and hasKnifeName(pp) then return true end
-        for _, d in ipairs(obj:GetDescendants()) do
-            if d:IsA("BasePart") and hasKnifeName(d) then return true end
-        end
-    end
-    return false
-end
-
-local function hideKnifeVisual(obj)
-    if not obj or not obj.Parent then return end
-    if obj:IsA("BasePart") or obj:IsA("MeshPart") or obj:IsA("UnionOperation") then
-        pcall(function()
-            obj.LocalTransparencyModifier = 1
-            obj.Transparency = 1
-            obj.CanCollide = false
-            obj.CanTouch = false
-            obj.CanQuery = false
-            obj.CastShadow = false
-        end)
-        for _, c in ipairs(obj:GetChildren()) do
-            if c:IsA("Decal") or c:IsA("Texture") then
-                pcall(function() c.Transparency = 1 end)
-            end
-            if c:IsA("ParticleEmitter") or c:IsA("Trail") or c:IsA("Beam") then
-                pcall(function() c.Enabled = false end)
-            end
-            if c:IsA("SpecialMesh") then
-                pcall(function() c.Transparency = 1 end)
-            end
-        end
-    elseif obj:IsA("Model") then
-        for _, d in ipairs(obj:GetDescendants()) do
-            if d:IsA("BasePart") or d:IsA("MeshPart") or d:IsA("UnionOperation") then
-                pcall(function()
-                    d.LocalTransparencyModifier = 1
-                    d.Transparency = 1
-                    d.CanCollide = false
-                    d.CanTouch = false
-                    d.CanQuery = false
-                    d.CastShadow = false
-                end)
-            elseif d:IsA("Decal") or d:IsA("Texture") then
-                pcall(function() d.Transparency = 1 end)
-            elseif d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Beam") then
-                pcall(function() d.Enabled = false end)
-            elseif d:IsA("SpecialMesh") then
-                pcall(function() d.Transparency = 1 end)
-            end
-        end
-    end
-end
-
-local function trackKnife(obj)
-    if antiLagTracked[obj] then return end
-    antiLagTracked[obj] = true
-    task.spawn(function()
-        while antiLagActive and obj and obj.Parent do
-            hideKnifeVisual(obj)
-            task.wait(0.05)
-        end
-        antiLagTracked[obj] = nil
-    end)
-end
-
-local function antiLagProcess(obj)
+local function processOne(obj)
     if not antiLagActive then return end
     if not obj or not obj.Parent then return end
-    if antiLagSeen[obj] then return end
-    antiLagSeen[obj] = true
+    if antiLagProcessed[obj] then return end
+    antiLagProcessed[obj] = true
 
-    if isShotEffect(obj) then return end
-    if isInsideCharacterOrToolOrBackpack(obj) then return end
-    if isCharacterPart(obj) then return end
-
-    if isKnifeObject(obj) then
-        hideKnifeVisual(obj)
-        trackKnife(obj)
-        return
-    end
-
-    if obj:IsA("BasePart") then
-        local p = obj.Parent
-        if p and not (p:IsA("Model") and (p:FindFirstChildOfClass("Humanoid") or PlayersService:GetPlayerFromCharacter(p))) then
-            if not isInsideCharacterOrToolOrBackpack(p) then
-                if (string.lower(obj.Name) == "handle") then
-                    local model = obj:FindFirstAncestorOfClass("Model")
-                    if model and not (model:FindFirstChildOfClass("Humanoid") or PlayersService:GetPlayerFromCharacter(model)) then
-                        hideKnifeVisual(model)
-                        trackKnife(model)
-                        return
-                    end
-                end
+    if isKnife(obj) then
+        local isMine = false
+        if obj:IsA("Tool") then
+            local backpack = MyPlayer:FindFirstChildOfClass("Backpack")
+            if obj.Parent == MyPlayer.Character or (backpack and obj.Parent == backpack) then
+                isMine = true
             end
         end
-    end
-
-    if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") or
-       obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-        if isShotEffect(obj) then return end
-        pcall(function() obj.Enabled = false end)
-        return
-    end
-
-    if obj:IsA("Sound") then
-        local n = string.lower(obj.Name)
-        if nameHasHint(n, {"shot", "gun", "bullet", "muzzle"}) then return end
-        if nameHasHint(n, {"knife", "throw", "slash", "stab", "dagger", "blade"}) then
-            pcall(function() obj.Volume = 0 end)
+        if not isMine then
+            pcall(function() obj:Destroy() end)
+            return
         end
+    end
+
+    if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
+        or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+        pcall(function() obj.Enabled = false end)
         return
     end
 
     if obj:IsA("BasePart") then
         local model = obj:FindFirstAncestorOfClass("Model")
-        if not (model and (model:FindFirstChildOfClass("Humanoid") or PlayersService:GetPlayerFromCharacter(model))) then
+        if not (model and model:FindFirstChildOfClass("Humanoid")) then
             pcall(function()
-                obj.CastShadow = false
-                obj.Material = Enum.Material.SmoothPlastic
-                obj.Reflectance = 0
+                if obj.CastShadow then obj.CastShadow = false end
+                if obj.Material ~= Enum.Material.SmoothPlastic then
+                    obj.Material = Enum.Material.SmoothPlastic
+                end
+                if obj.Reflectance > 0 then obj.Reflectance = 0 end
             end)
         end
     end
@@ -1709,32 +1596,25 @@ end
 local function antiLagOn()
     if antiLagActive then return end
     antiLagActive = true
+
     if antiLagConnection then
         pcall(function() antiLagConnection:Disconnect() end)
     end
+
     antiLagConnection = workspace.DescendantAdded:Connect(function(obj)
-        if obj:IsA("BasePart") or obj:IsA("Model") or obj:IsA("MeshPart")
-           or obj:IsA("UnionOperation") or obj:IsA("ParticleEmitter")
-           or obj:IsA("Trail") or obj:IsA("Beam") or obj:IsA("Sound")
-           or obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("SpecialMesh") then
-            task.defer(function() antiLagProcess(obj) end)
-        end
+        if not antiLagActive then return end
+        task.defer(function() processOne(obj) end)
     end)
+
     task.spawn(function()
+        task.wait(0.5)
+        if not antiLagActive then return end
+        local count = 0
         for _, obj in ipairs(workspace:GetDescendants()) do
             if not antiLagActive then return end
-            antiLagProcess(obj)
-        end
-    end)
-    task.spawn(function()
-        while antiLagActive do
-            task.wait(1)
-            for _, obj in ipairs(workspace:GetChildren()) do
-                if not antiLagActive then return end
-                if obj:IsA("BasePart") or obj:IsA("Model") then
-                    antiLagProcess(obj)
-                end
-            end
+            processOne(obj)
+            count = count + 1
+            if count % 500 == 0 then task.wait() end
         end
     end)
 end
@@ -1745,8 +1625,7 @@ local function antiLagOff()
         pcall(function() antiLagConnection:Disconnect() end)
         antiLagConnection = nil
     end
-    antiLagSeen = setmetatable({}, { __mode = "k" })
-    antiLagTracked = setmetatable({}, { __mode = "k" })
+    antiLagProcessed = setmetatable({}, { __mode = "k" })
 end
 
 pcall(function()
