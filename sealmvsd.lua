@@ -155,12 +155,16 @@ local UserInputServiceRef = game:GetService("UserInputService")
 local VirtualUserService  = game:GetService("VirtualUser")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local CoreGuiRef          = game:GetService("CoreGui")
+local TweenServiceRef     = game:GetService("TweenService")
+local DebrisService       = game:GetService("Debris")
 local MyPlayer            = PlayersService.LocalPlayer
 
 local DANCE_R15 = "rbxassetid://507776879"
 local DANCE_R6  = "rbxassetid://182435998"
 local FLAGS_MULTIPLIER = 4.5
 local JUMP_SOUND_NEW   = "rbxassetid://2428506580"
+
+local DEFAULT_WALKSPEED = 32
 
 local S = {
     InMatch = false, EnemyList = {}, EnemySet = {},
@@ -169,7 +173,7 @@ local S = {
     HitboxColor = Color3.fromRGB(255, 0, 0),
     CharmESP = false, TracerESP = false, NameESP = false,
     MateColor = Color3.fromRGB(255, 255, 255), FoeColor = Color3.fromRGB(0, 0, 0),
-    GuiHidden = false, NoclipOn = false, SpeedOn = false, SpeedValue = 16,
+    GuiHidden = false, NoclipOn = false, SpeedOn = false, SpeedValue = DEFAULT_WALKSPEED,
     FlagsOn = false, FarmOn = false, FarmWalkSpeed = 40, LastDance = 0,
     DanceTrack = nil, DanceAnimObj = nil,
     AntiExploiterOn = false, AntiExploiterForce = 3,
@@ -185,9 +189,46 @@ local S = {
 
 local AnchorRelease = false
 
+local SavedState = {
+    WalkSpeed = nil,
+    JumpPower = nil,
+    JumpHeight = nil,
+    AutoRotate = nil,
+    DefaultWalkSpeed = DEFAULT_WALKSPEED,
+    DefaultJumpPower = 50,
+    DefaultJumpHeight = 7.2,
+}
+
 local function dbg(m) warn("[SealDev] " .. tostring(m)) end
 local function Notify(m) pcall(function() Hub:Notify({ Title = "SealDev", Content = tostring(m), Duration = 2.5, Icon = LOGO }) end) end
 dbg("loaded")
+
+local function rememberHumanoidDefaults()
+    local char = MyPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    if SavedState.WalkSpeed == nil then SavedState.WalkSpeed = hum.WalkSpeed end
+    if SavedState.JumpPower == nil then SavedState.JumpPower = hum.JumpPower end
+    if SavedState.JumpHeight == nil then SavedState.JumpHeight = hum.UseJumpPower and nil or hum.JumpHeight end
+    if SavedState.AutoRotate == nil then SavedState.AutoRotate = hum.AutoRotate end
+end
+
+local function restoreHumanoidDefaults()
+    local char = MyPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    pcall(function()
+        hum.WalkSpeed = SavedState.DefaultWalkSpeed
+        if hum.UseJumpPower then
+            hum.JumpPower = SavedState.DefaultJumpPower
+        else
+            hum.JumpHeight = SavedState.DefaultJumpHeight
+        end
+        if SavedState.AutoRotate ~= nil then hum.AutoRotate = SavedState.AutoRotate end
+    end)
+end
 
 local function FindKnife()
     if S.CachedKnife and S.CachedKnife.Parent then return S.CachedKnife end
@@ -205,6 +246,19 @@ local function FindKnife()
     return nil
 end
 
+local function FindGun()
+    for _, c in ipairs({ MyPlayer:FindFirstChildOfClass("Backpack"), MyPlayer.Character }) do
+        if c then
+            for _, t in ipairs(c:GetChildren()) do
+                if t:IsA("Tool") and t:FindFirstChild("Fire") and t:FindFirstChild("Reload") then
+                    return t
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local function EquipTool(t)
     if not t then return end
     local b = MyPlayer.Character
@@ -214,12 +268,110 @@ end
 
 local RemoteFolder = RS:WaitForChild("Remotes", 10)
 
+local lastThrown = {}
+local THROW_COOLDOWN = 0.06
+
 local function ThrowKnife(tb)
     local r = tb and tb:FindFirstChild("HumanoidRootPart")
     if not r then return end
+    local plr = PlayersService:GetPlayerFromCharacter(tb)
+    if plr then
+        local last = lastThrown[plr]
+        if last and tick() - last < THROW_COOLDOWN then return end
+        lastThrown[plr] = tick()
+    end
     local rem = RemoteFolder and RemoteFolder:FindFirstChild("ThrowHit")
     if not rem then return end
     pcall(function() rem:FireServer(r, r.Position) end)
+end
+
+local BulletRendererColor = Color3.fromRGB(255, 255, 255)
+
+local function BulletRenderer(origin, targetPos)
+    local function CreatePseudoPart(cf)
+        local p = Instance.new("Part")
+        p.Size = Vector3.new(0.1, 0.1, 0.1)
+        p.Transparency = 1
+        p.CanCollide = false
+        p.CanQuery = false
+        p.CanTouch = false
+        p.Anchored = true
+        p.CFrame = cf
+        p.Parent = WorkspaceService
+        return p
+    end
+    local startPart = CreatePseudoPart(CFrame.lookAt(origin, targetPos) * CFrame.new(0, 0, -1))
+    local endPart = CreatePseudoPart(CFrame.new(targetPos))
+    local beam = Instance.new("Beam")
+    beam.Texture = ""
+    beam.TextureLength = 1
+    beam.TextureMode = Enum.TextureMode.Stretch
+    beam.TextureSpeed = 0
+    beam.Color = ColorSequence.new(BulletRendererColor)
+    beam.LightEmission = 1
+    beam.LightInfluence = 0
+    beam.Brightness = 5
+    beam.Width0 = 0
+    beam.Width1 = 0
+    local att0 = Instance.new("Attachment", startPart)
+    local att1 = Instance.new("Attachment", endPart)
+    beam.Attachment0 = att0
+    beam.Attachment1 = att1
+    beam.Parent = startPart
+    startPart:SetAttribute("SealDevMine", true)
+    endPart:SetAttribute("SealDevMine", true)
+    local fadeIn = TweenServiceRef:Create(beam, TweenInfo.new(0.05, Enum.EasingStyle.Cubic, Enum.EasingDirection.In), {
+        Width0 = 0.3, Width1 = 0.6
+    })
+    local fadeOut = TweenServiceRef:Create(beam, TweenInfo.new(0.1, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), {
+        Width0 = 0, Width1 = 0
+    })
+    fadeIn:Play()
+    fadeIn.Completed:Connect(function() fadeOut:Play() end)
+    DebrisService:AddItem(startPart, 0.3)
+    DebrisService:AddItem(endPart, 0.3)
+end
+
+local function CharacterRayOrigin(char)
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    return (hrp.CFrame * CFrame.new(0, 0, hrp.Size.Z / 2)).Position
+end
+
+local GUN_KILL_COOLDOWN = 0.06
+local GUN_KILL_INTERVAL = 0.015
+local lastGunShot = {}
+
+local function ShootGunKill(target)
+    if not target or not target.Character then return end
+    local myChar = MyPlayer.Character
+    if not myChar then return end
+    local origin = CharacterRayOrigin(myChar)
+    if not origin then return end
+
+    local hitPart = target.Character:FindFirstChild("Head")
+                 or target.Character:FindFirstChild("HumanoidRootPart")
+    if not hitPart then return end
+
+    local tool = FindGun()
+    if not tool then return end
+
+    local targetPos = hitPart.Position
+    local muzzle = tool:FindFirstChild("Muzzle", true)
+    local startPos = muzzle and muzzle.WorldPosition or origin
+
+    BulletRenderer(startPos, targetPos)
+
+    local sg = RemoteFolder and RemoteFolder:FindFirstChild("ShootGun")
+    if not sg then return end
+    pcall(function()
+        sg:FireServer(origin, targetPos, hitPart, targetPos)
+    end)
+
+    local sound = tool:FindFirstChild("Fire")
+    if sound and sound:IsA("Sound") then
+        pcall(function() sound:Play() end)
+    end
 end
 
 local function hasClearLOS(fromPart, targetChar)
@@ -230,9 +382,7 @@ local function hasClearLOS(fromPart, targetChar)
     local th = targetChar:FindFirstChild("Head")
     if not th then return false end
     local res = WorkspaceService:Raycast(fromPart.Position, th.Position - fromPart.Position, params)
-    if res then
-        return res.Instance:IsDescendantOf(targetChar)
-    end
+    if res then return res.Instance:IsDescendantOf(targetChar) end
     return true
 end
 
@@ -312,7 +462,7 @@ local function getClosestEnemyInFOV()
     return closest
 end
 
-RunServiceRef.RenderStepped:Connect(function()
+local aimbotConn = RunServiceRef.RenderStepped:Connect(function()
     if not S.AimbotOn or S.GuiHidden or not S.InMatch then return end
     if not UserInputServiceRef:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
     local target = getClosestEnemyInFOV()
@@ -347,7 +497,8 @@ end
 
 local triggerBusy = false
 task.spawn(function()
-    while task.wait(0.03) do
+    while true do
+        task.wait(0.03)
         if S.TriggerOn and not S.GuiHidden and S.InMatch and not triggerBusy then
             if isFirstPerson() then
                 local now = tick()
@@ -390,6 +541,12 @@ end)
 
 MyPlayer.CharacterAdded:Connect(function(body)
     S.CachedKnife = nil
+    lastThrown = {}
+    lastGunShot = {}
+    SavedState.WalkSpeed = nil
+    SavedState.JumpPower = nil
+    SavedState.JumpHeight = nil
+    SavedState.AutoRotate = nil
     if not AnchorRelease then return end
     local root = body:WaitForChild("HumanoidRootPart", 5)
     local hp = body:WaitForChild("Humanoid", 5)
@@ -602,6 +759,10 @@ RunServiceRef:BindToRenderStep(flickBindName, Enum.RenderPriority.Camera.Value +
         flickState = "idle"
         flickOriginalCF = nil
         flickOriginalHRP = nil
+        flickReturnProgress = 0
+        flickAimFrames = 0
+        flickOvershootTarget = nil
+        flickOvershootDone = false
         return
     end
     if checkShiftlockRaw() then
@@ -902,6 +1063,16 @@ local function flagsStop()
     replacedJumpSounds = setmetatable({}, { __mode = "k" })
 end
 
+local function restoreAllHitboxes()
+    for _, o in ipairs(PlayersService:GetPlayers()) do
+        if o ~= MyPlayer and o.Character then
+            local r = o.Character:FindFirstChild("HumanoidRootPart")
+            if r then pcall(function() r.Size = Vector3.new(2, 2, 1) end) end
+        end
+    end
+    for _, b in ipairs(HitboxFolder:GetChildren()) do pcall(function() b:Destroy() end) end
+end
+
 local MainPage = Hub:Tab({ Title = "Main", Icon = "layout-dashboard", Locked = false })
 
 MainPage:Button({
@@ -955,13 +1126,7 @@ MainPage:Toggle({
         if v then
             Notify("Hitbox ON")
         else
-            for _, o in ipairs(PlayersService:GetPlayers()) do
-                if o ~= MyPlayer and o.Character then
-                    local r = o.Character:FindFirstChild("HumanoidRootPart")
-                    if r then r.Size = Vector3.new(2, 2, 1) end
-                end
-            end
-            for _, b in ipairs(HitboxFolder:GetChildren()) do b:Destroy() end
+            restoreAllHitboxes()
             Notify("Hitbox OFF")
         end
     end,
@@ -1030,33 +1195,114 @@ end)
 
 local KillPage = Hub:Tab({ Title = "Kill All", Icon = "skull", Locked = false })
 
-KillPage:Button({
-    Title = "Kill everyone once",
-    Callback = function()
-        if not S.InMatch then Notify("Not in match") return end
-        EquipTool(FindKnife())
-        for _, o in ipairs(PlayersService:GetPlayers()) do
-            if o ~= MyPlayer and not isTeammate(o) and o.Character then
-                local h = o.Character:FindFirstChildOfClass("Humanoid")
-                if h and h.Health > 0 then ThrowKnife(o.Character) end
+local GunSection = KillPage:Section({ Title = "Gun", Opened = true })
+local KnifeSection = KillPage:Section({ Title = "Knife", Opened = true })
+
+local gunKillOn = false
+local lastGunShot = {}
+
+local function killAllWithGunOnce()
+    if not S.InMatch then Notify("Not in match") return end
+    if not FindGun() then Notify("No gun in inventory!") return end
+    lastGunShot = {}
+    local targets = {}
+    for _, o in ipairs(PlayersService:GetPlayers()) do
+        if o ~= MyPlayer and not isTeammate(o) and o.Character then
+            local h = o.Character:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 then
+                targets[#targets + 1] = o
             end
-            task.wait(0.001)
         end
-        Notify("Knife burst sent")
+    end
+    for _, plr in ipairs(targets) do
+        ShootGunKill(plr)
+    end
+    Notify("Gun burst sent (" .. #targets .. ")")
+end
+
+GunSection:Button({
+    Title = "Kill all players once",
+    Callback = function() killAllWithGunOnce() end,
+})
+
+GunSection:Toggle({
+    Title = "Auto kill players (Gun)",
+    Default = false,
+    Callback = function(v)
+        gunKillOn = v
+        if v then
+            lastGunShot = {}
+            task.spawn(function()
+                while gunKillOn do
+                    if S.InMatch and not S.GuiHidden then
+                        local tool = FindGun()
+                        if tool then
+                            local myChar = MyPlayer.Character
+                            if myChar and not myChar:FindFirstChildOfClass("Tool") then
+                                EquipTool(tool)
+                            end
+                            for _, o in ipairs(S.EnemyList) do
+                                if not isTeammate(o) then
+                                    local c = o.Character
+                                    if c then
+                                        local h = c:FindFirstChildOfClass("Humanoid")
+                                        if h and h.Health > 0 then
+                                            ShootGunKill(o)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    task.wait(GUN_KILL_INTERVAL)
+                end
+            end)
+            Notify("Auto Gun Kill ON")
+        else
+            Notify("Auto Gun Kill OFF")
+        end
     end,
 })
 
-local KnifeLoopOn = false
-KillPage:Toggle({
-    Title = "Auto kill (Knife)", Default = false,
+local knifeKillOn = false
+local KNIFE_KILL_INTERVAL = 0.015
+
+local function killAllWithKnifeOnce()
+    if not S.InMatch then Notify("Not in match") return end
+    EquipTool(FindKnife())
+    lastThrown = {}
+    local targets = {}
+    for _, o in ipairs(PlayersService:GetPlayers()) do
+        if o ~= MyPlayer and not isTeammate(o) and o.Character then
+            local h = o.Character:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 then targets[#targets + 1] = o.Character end
+        end
+    end
+    for _, char in ipairs(targets) do
+        ThrowKnife(char)
+    end
+    Notify("Knife burst sent (" .. #targets .. ")")
+end
+
+KnifeSection:Button({
+    Title = "Kill all players once",
+    Callback = function() killAllWithKnifeOnce() end,
+})
+
+KnifeSection:Toggle({
+    Title = "Auto kill players (Knife)",
+    Default = false,
     Callback = function(v)
-        KnifeLoopOn = v
+        knifeKillOn = v
         if v then
+            lastThrown = {}
             task.spawn(function()
-                while KnifeLoopOn do
+                while knifeKillOn do
                     if S.InMatch and not S.GuiHidden then
-                        EquipTool(FindKnife())
-                        local anyKilled = false
+                        local knife = FindKnife()
+                        if knife and knife.Parent ~= MyPlayer.Character then
+                            EquipTool(knife)
+                        end
                         for _, o in ipairs(S.EnemyList) do
                             if not isTeammate(o) then
                                 local c = o.Character
@@ -1064,19 +1310,17 @@ KillPage:Toggle({
                                     local h = c:FindFirstChildOfClass("Humanoid")
                                     if h and h.Health > 0 then
                                         ThrowKnife(c)
-                                        anyKilled = true
                                     end
                                 end
                             end
                         end
-                        if not anyKilled then
-                            task.wait(0.05)
-                        end
-                    else
-                        task.wait(0.1)
                     end
+                    task.wait(KNIFE_KILL_INTERVAL)
                 end
             end)
+            Notify("Auto Knife Kill ON")
+        else
+            Notify("Auto Knife Kill OFF")
         end
     end,
 })
@@ -1146,6 +1390,17 @@ local function farmWalkTo(mo)
     return false
 end
 
+local function farmDisable()
+    currentFarmPad = nil
+    stopDance()
+    disableAntiAfk()
+    local h = MyPlayer.Character and MyPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if h then pcall(function() h.WalkSpeed = DEFAULT_WALKSPEED end) end
+    for _, p in ipairs((MyPlayer.Character and MyPlayer.Character:GetDescendants()) or {}) do
+        if p:IsA("BasePart") then pcall(function() p.CanCollide = true end) end
+    end
+end
+
 local FarmPage = Hub:Tab({ Title = "Farm", Icon = "wheat", Locked = false })
 FarmPage:Toggle({
     Title = "Auto Farm", Desc = "Kills every 0.01s + tp 600 back", Default = false,
@@ -1161,10 +1416,8 @@ FarmPage:Toggle({
             enableAntiAfk()
             Notify("Farm ON: kill every 0.01s + tp 600")
         else
+            farmDisable()
             Notify("Farm OFF")
-            currentFarmPad = nil
-            stopDance()
-            disableAntiAfk()
         end
     end,
 })
@@ -1378,31 +1631,56 @@ EspPage:Colorpicker({
     Callback = function(c) S.FoeColor = c end,
 })
 
+local noclipConn = nil
+local noclipOriginalCollide = {}
+
 local MovePage = Hub:Tab({ Title = "Movement", Icon = "footprints", Locked = false })
+
 MovePage:Toggle({
     Title = "Noclip", Default = false,
     Callback = function(v)
         S.NoclipOn = v
         if v then
-            task.spawn(function()
-                while S.NoclipOn do
-                    local b = MyPlayer.Character
-                    if b then
-                        for _, p in ipairs(b:GetDescendants()) do
-                            if p:IsA("BasePart") then p.CanCollide = false end
+            noclipConn = RunServiceRef.Stepped:Connect(function()
+                if not S.NoclipOn then return end
+                local b = MyPlayer.Character
+                if b then
+                    for _, p in ipairs(b:GetDescendants()) do
+                        if p:IsA("BasePart") then
+                            if noclipOriginalCollide[p] == nil then
+                                noclipOriginalCollide[p] = p.CanCollide
+                            end
+                            p.CanCollide = false
                         end
                     end
-                    task.wait()
                 end
             end)
+        else
+            if noclipConn then noclipConn:Disconnect(); noclipConn = nil end
+            for part, val in pairs(noclipOriginalCollide) do
+                if part and part.Parent then
+                    pcall(function() part.CanCollide = val end)
+                end
+            end
+            noclipOriginalCollide = {}
+            local b = MyPlayer.Character
+            if b then
+                for _, p in ipairs(b:GetDescendants()) do
+                    if p:IsA("BasePart") then
+                        pcall(function() p.CanCollide = true end)
+                    end
+                end
+            end
         end
     end,
 })
+
 MovePage:Toggle({
     Title = "Speed Changer", Default = false,
     Callback = function(v)
         S.SpeedOn = v
         if v then
+            rememberHumanoidDefaults()
             task.spawn(function()
                 while S.SpeedOn do
                     local h = MyPlayer.Character and MyPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -1412,14 +1690,23 @@ MovePage:Toggle({
             end)
         else
             local h = MyPlayer.Character and MyPlayer.Character:FindFirstChildOfClass("Humanoid")
-            if h then h.WalkSpeed = 16 end
+            if h then
+                h.WalkSpeed = SavedState.WalkSpeed or DEFAULT_WALKSPEED
+            end
         end
     end,
 })
+
 MovePage:Slider({
     Title = "Walk Speed", Step = 1,
-    Value = { Min = 16, Max = 250, Default = 16 },
-    Callback = function(v) S.SpeedValue = v end,
+    Value = { Min = 16, Max = 250, Default = 32 },
+    Callback = function(v)
+        S.SpeedValue = v
+        if S.SpeedOn then
+            local h = MyPlayer.Character and MyPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if h then h.WalkSpeed = v end
+        end
+    end,
 })
 
 local FlickPage = Hub:Tab({ Title = "Flick", Icon = "crosshair", Locked = false })
@@ -1429,6 +1716,18 @@ FlickPage:Toggle({
     Default = false,
     Callback = function(v)
         S.FlickOn = v
+        if not v then
+            flickState = "idle"
+            flickOriginalCF = nil
+            flickOriginalHRP = nil
+            flickReturnProgress = 0
+            flickAimFrames = 0
+            flickOvershootTarget = nil
+            flickOvershootDone = false
+            shiftlockFrames = 0
+            local hum = MyPlayer.Character and MyPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.AutoRotate = true end
+        end
         Notify(v and "Flick Mode ON" or "Flick Mode OFF")
     end,
 })
@@ -1553,24 +1852,51 @@ local function isKnife(inst)
     return false
 end
 
+local function isMine(obj)
+    if not obj then return false end
+    if obj:GetAttribute("SealDevMine") == true then return true end
+    local myChar = MyPlayer.Character
+    if myChar and obj:IsDescendantOf(myChar) then return true end
+    local backpack = MyPlayer:FindFirstChildOfClass("Backpack")
+    if backpack and obj:IsDescendantOf(backpack) then return true end
+    local owner = obj:GetAttribute("ProjectileOwner") or obj:GetAttribute("Owner")
+    if owner == MyPlayer or owner == MyPlayer.UserId or owner == MyPlayer.Name then return true end
+    return false
+end
+
+local function isGunSoundOrEffect(obj)
+    if not obj then return false end
+    if obj:IsA("Sound") then
+        local n = lower(obj.Name)
+        if n == "fire" or n == "shot" or n == "shoot" or n == "gunshot"
+           or string.find(n, "fire", 1, true)
+           or string.find(n, "shot", 1, true)
+           or string.find(n, "shoot", 1, true)
+           or string.find(n, "gun", 1, true)
+           or string.find(n, "reload", 1, true) then
+            return true
+        end
+    end
+    if obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") then
+        if isGunEffectByName(obj.Name) then return true end
+    end
+    return false
+end
+
 local function processOne(obj)
     if not antiLagActive then return end
     if not obj or not obj.Parent then return end
     if antiLagProcessed[obj] then return end
     antiLagProcessed[obj] = true
 
+    if isMine(obj) then return end
+    if isGunSoundOrEffect(obj) then return end
+
     if isKnife(obj) then
-        local isMine = false
-        if obj:IsA("Tool") then
-            local backpack = MyPlayer:FindFirstChildOfClass("Backpack")
-            if obj.Parent == MyPlayer.Character or (backpack and obj.Parent == backpack) then
-                isMine = true
-            end
-        end
-        if not isMine then
+        if not isMine(obj) then
             pcall(function() obj:Destroy() end)
-            return
         end
+        return
     end
 
     if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
@@ -1601,7 +1927,7 @@ local function antiLagOn()
         pcall(function() antiLagConnection:Disconnect() end)
     end
 
-    antiLagConnection = workspace.DescendantAdded:Connect(function(obj)
+    antiLagConnection = WorkspaceService.DescendantAdded:Connect(function(obj)
         if not antiLagActive then return end
         task.defer(function() processOne(obj) end)
     end)
@@ -1610,7 +1936,7 @@ local function antiLagOn()
         task.wait(0.5)
         if not antiLagActive then return end
         local count = 0
-        for _, obj in ipairs(workspace:GetDescendants()) do
+        for _, obj in ipairs(WorkspaceService:GetDescendants()) do
             if not antiLagActive then return end
             processOne(obj)
             count = count + 1
@@ -1634,6 +1960,7 @@ end)
 
 local antiLagToggle = MiscPage:Toggle({
     Title = "Anti-Lag",
+    Desc = "Blocks enemy lag/crash. Your gun & knife effects stay visible.",
     Default = false,
     Callback = function(v)
         if v then
@@ -1716,8 +2043,43 @@ end)
 pcall(function()
     Hub:OnDestroy(function()
         _G.SealDevV27Loaded = nil
+        gunKillOn = false
+        knifeKillOn = false
+        S.FarmOn = false
+        S.SpeedOn = false
+        S.NoclipOn = false
+        S.FlickOn = false
+        S.FlagsOn = false
+        S.AimbotOn = false
+        S.TriggerOn = false
+        S.HitboxOn = false
+        S.CooldownOff = false
+        S.AntiExploiterOn = false
+        S.CharmESP = false
+        S.TracerESP = false
+        S.NameESP = false
+        AnchorRelease = false
         pcall(function() RunServiceRef:UnbindFromRenderStep(flickBindName) end)
         pcall(function() antiLagOff() end)
+        pcall(function() farmDisable() end)
+        pcall(function() restoreAllHitboxes() end)
+        pcall(function() restoreHumanoidDefaults() end)
+        pcall(function()
+            if noclipConn then noclipConn:Disconnect() end
+            for part, val in pairs(noclipOriginalCollide) do
+                if part and part.Parent then part.CanCollide = val end
+            end
+        end)
+        pcall(function()
+            for _, f in ipairs({ CharmFolder, TracerFolder, NameFolder, HitboxFolder }) do
+                f:ClearAllChildren()
+            end
+        end)
+        pcall(function() if TracerConn then TracerConn:Disconnect() end end)
+        pcall(function() if aimbotConn then aimbotConn:Disconnect() end end)
+        pcall(function() if antiAfkConn then antiAfkConn:Disconnect() end end)
+        pcall(function() stopDance() end)
+        pcall(function() fovGui:Destroy() end)
     end)
 end)
 
