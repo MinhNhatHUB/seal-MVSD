@@ -1,14 +1,60 @@
 local loadingGui = nil
+local loadingConnections = {}
+local loadingActive = true
+local loadingFinished = false
+
+local function finishLoading()
+    if loadingFinished then return end
+    loadingFinished = true
+    if not loadingGui or not loadingGui.Parent then return end
+
+    local ts = game:GetService("TweenService")
+    local bg = loadingGui:FindFirstChild("bg")
+    local logoImage = loadingGui:FindFirstChild("logoImage")
+    local logoFrame = loadingGui:FindFirstChild("logoFrame")
+
+    local fadeOutInfo = TweenInfo.new(0.35, Enum.EasingStyle.Sine, Enum.EasingDirection.In)
+
+    if bg then ts:Create(bg, fadeOutInfo, { BackgroundTransparency = 1 }):Play() end
+    if logoImage then ts:Create(logoImage, fadeOutInfo, { ImageTransparency = 1 }):Play() end
+
+    if logoFrame then
+        local sealText = logoFrame:FindFirstChild("sealText")
+        local devBox = logoFrame:FindFirstChild("devBox")
+        local author = logoFrame:FindFirstChild("author")
+        if sealText then ts:Create(sealText, fadeOutInfo, { TextTransparency = 1 }):Play() end
+        if author then ts:Create(author, fadeOutInfo, { TextTransparency = 1 }):Play() end
+        if devBox then
+            local devText = devBox:FindFirstChild("devText")
+            if devText then ts:Create(devText, fadeOutInfo, { TextTransparency = 1 }):Play() end
+            ts:Create(devBox, fadeOutInfo, { BackgroundTransparency = 1 }):Play()
+        end
+    end
+
+    task.delay(0.4, function()
+        loadingActive = false
+        for _, conn in ipairs(loadingConnections) do
+            if typeof(conn) == "RBXScriptConnection" then
+                pcall(function() conn:Disconnect() end)
+            end
+        end
+        loadingConnections = {}
+        if loadingGui then loadingGui:Destroy() end
+    end)
+end
+
 do
     local lp = game:GetService("Players").LocalPlayer
     local pg = lp:WaitForChild("PlayerGui")
     local ts = game:GetService("TweenService")
+    local rs = game:GetService("RunService")
 
     loadingGui = Instance.new("ScreenGui")
     loadingGui.Name = "SealDevLoading"
     loadingGui.ResetOnSpawn = false
     loadingGui.IgnoreGuiInset = true
     loadingGui.DisplayOrder = 999999
+    loadingGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     loadingGui.Parent = pg
 
     local bg = Instance.new("Frame")
@@ -17,64 +63,175 @@ do
     bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     bg.BackgroundTransparency = 1
     bg.BorderSizePixel = 0
+    bg.ZIndex = 1
     bg.Parent = loadingGui
 
-    local title = Instance.new("TextLabel")
-    title.Name = "title"
-    title.AnchorPoint = Vector2.new(0.5, 0.5)
-    title.Size = UDim2.new(1, 0, 0, 140)
-    title.Position = UDim2.new(0.5, 0, 0.5, -70)
-    title.BackgroundTransparency = 1
-    title.RichText = true
-    title.Text = '<font color="rgb(80,150,255)">Seal</font><font color="rgb(255,60,60)">Dev</font>'
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.Font = Enum.Font.SciFi
-    title.TextSize = 110
-    title.TextTransparency = 1
-    title.Parent = loadingGui
+    local bgGradient = Instance.new("UIGradient")
+    bgGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 0, 0)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(15, 10, 35)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 0)),
+    })
+    bgGradient.Rotation = 45
+    bgGradient.Parent = bg
 
-    local loading = Instance.new("TextLabel")
-    loading.Name = "loading"
-    loading.AnchorPoint = Vector2.new(0.5, 0.5)
-    loading.Size = UDim2.new(1, 0, 0, 30)
-    loading.Position = UDim2.new(0.5, 0, 0.5, 75)
-    loading.BackgroundTransparency = 1
-    loading.Text = "Loading..."
-    loading.TextColor3 = Color3.fromRGB(180, 180, 180)
-    loading.Font = Enum.Font.Gotham
-    loading.TextSize = 18
-    loading.TextTransparency = 1
-    loading.Parent = loadingGui
+    local particleLayer = Instance.new("Frame")
+    particleLayer.Name = "particles"
+    particleLayer.Size = UDim2.new(1, 0, 1, 0)
+    particleLayer.BackgroundTransparency = 1
+    particleLayer.ZIndex = 2
+    particleLayer.ClipsDescendants = true
+    particleLayer.Parent = loadingGui
 
-    ts:Create(bg, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { BackgroundTransparency = 0 }):Play()
-    task.wait(0.2)
-    ts:Create(title, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
-    ts:Create(loading, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { TextTransparency = 0.15 }):Play()
-end
+    local logoImage = Instance.new("ImageLabel")
+    logoImage.Name = "logoImage"
+    logoImage.AnchorPoint = Vector2.new(0.5, 0.5)
+    logoImage.Position = UDim2.new(0.5, 0, 0.5, -180)
+    logoImage.Size = UDim2.new(0, 150, 0, 150)
+    logoImage.BackgroundTransparency = 1
+    logoImage.Image = "rbxassetid://131261307870420"
+    logoImage.ImageTransparency = 1
+    logoImage.ScaleType = Enum.ScaleType.Fit
+    logoImage.ZIndex = 5
+    logoImage.Parent = loadingGui
 
-local function hideLoadingGui()
-    if not loadingGui or not loadingGui.Parent then return end
-    local ts = game:GetService("TweenService")
-    local bg = loadingGui:FindFirstChild("bg")
-    local title = loadingGui:FindFirstChild("title")
-    local loading = loadingGui:FindFirstChild("loading")
-    if title then
-        ts:Create(title, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
+    local logoFrame = Instance.new("Frame")
+    logoFrame.Name = "logoFrame"
+    logoFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    logoFrame.Position = UDim2.new(0.5, 0, 0.5, -30)
+    logoFrame.Size = UDim2.new(0, 900, 0, 200)
+    logoFrame.BackgroundTransparency = 1
+    logoFrame.ZIndex = 5
+    logoFrame.Parent = loadingGui
+
+    local TEXT_SIZE = 120
+    local BOX_PADDING_X = 22
+    local BOX_PADDING_Y = 8
+    local BOX_HEIGHT = TEXT_SIZE + BOX_PADDING_Y * 2
+
+    local sealText = Instance.new("TextLabel")
+    sealText.Name = "sealText"
+    sealText.AnchorPoint = Vector2.new(1, 0.5)
+    sealText.Position = UDim2.new(0.5, -6, 0.5, 0)
+    sealText.Size = UDim2.new(0, 320, 0, BOX_HEIGHT)
+    sealText.BackgroundTransparency = 1
+    sealText.Text = "Seal"
+    sealText.TextColor3 = Color3.fromRGB(255, 255, 255)
+    sealText.Font = Enum.Font.GothamBold
+    sealText.TextSize = TEXT_SIZE
+    sealText.TextXAlignment = Enum.TextXAlignment.Right
+    sealText.TextYAlignment = Enum.TextYAlignment.Center
+    sealText.TextTransparency = 1
+    sealText.ZIndex = 5
+    sealText.Parent = logoFrame
+
+    local devBox = Instance.new("Frame")
+    devBox.Name = "devBox"
+    devBox.AnchorPoint = Vector2.new(0, 0.5)
+    devBox.Position = UDim2.new(0.5, 6, 0.5, 0)
+    devBox.Size = UDim2.new(0, 230, 0, BOX_HEIGHT)
+    devBox.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+    devBox.BorderSizePixel = 0
+    devBox.BackgroundTransparency = 1
+    devBox.ZIndex = 5
+    devBox.Parent = logoFrame
+
+    local devBoxCorner = Instance.new("UICorner")
+    devBoxCorner.CornerRadius = UDim.new(0, 8)
+    devBoxCorner.Parent = devBox
+
+    local devText = Instance.new("TextLabel")
+    devText.Name = "devText"
+    devText.Size = UDim2.new(1, 0, 1, 0)
+    devText.BackgroundTransparency = 1
+    devText.Text = "Dev"
+    devText.TextColor3 = Color3.fromRGB(0, 0, 0)
+    devText.Font = Enum.Font.GothamBold
+    devText.TextSize = TEXT_SIZE
+    devText.TextTransparency = 1
+    devText.ZIndex = 6
+    devText.Parent = devBox
+
+    local author = Instance.new("TextLabel")
+    author.Name = "author"
+    author.AnchorPoint = Vector2.new(0.5, 0.5)
+    author.Position = UDim2.new(0.5, 0, 0.5, 100)
+    author.Size = UDim2.new(0, 400, 0, 30)
+    author.BackgroundTransparency = 1
+    author.Text = "by SealDev"
+    author.TextColor3 = Color3.fromRGB(160, 160, 200)
+    author.Font = Enum.Font.Gotham
+    author.TextSize = 16
+    author.TextTransparency = 1
+    author.ZIndex = 5
+    author.Parent = logoFrame
+
+    local function spawnParticle()
+        if not loadingActive then return end
+        local p = Instance.new("Frame")
+        p.Size = UDim2.new(0, math.random(2, 5), 0, math.random(2, 5))
+        p.BackgroundColor3 = Color3.fromRGB(
+            math.random(200, 255),
+            math.random(120, 200),
+            math.random(0, 100)
+        )
+        p.BorderSizePixel = 0
+        p.BackgroundTransparency = 0.3
+        p.Position = UDim2.new(math.random(), 0, 1.1, 0)
+        p.ZIndex = 2
+
+        local pCorner = Instance.new("UICorner")
+        pCorner.CornerRadius = UDim.new(1, 0)
+        pCorner.Parent = p
+        p.Parent = particleLayer
+
+        local duration = math.random(3, 6)
+        local targetY = -0.1
+        local drift = (math.random() - 0.5) * 0.15
+
+        local tween = ts:Create(p, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+            Position = UDim2.new(p.Position.X.Scale + drift, 0, targetY, 0),
+            BackgroundTransparency = 1,
+        })
+        tween:Play()
+        tween.Completed:Connect(function()
+            p:Destroy()
+        end)
     end
-    if loading then
-        ts:Create(loading, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
-    end
-    if bg then
-        ts:Create(bg, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.In), { BackgroundTransparency = 1 }):Play()
-    end
-    task.delay(0.6, function()
-        pcall(function() if loadingGui then loadingGui:Destroy() end end)
+
+    local particleThread = task.spawn(function()
+        while loadingActive do
+            spawnParticle()
+            task.wait(0.04)
+        end
     end)
+    table.insert(loadingConnections, particleThread)
+
+    local FADE_FAST = TweenInfo.new(0.27, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+
+    ts:Create(bg, FADE_FAST, { BackgroundTransparency = 0 }):Play()
+    task.wait(0.33)
+
+    ts:Create(logoImage, FADE_FAST, { ImageTransparency = 0 }):Play()
+    task.wait(0.33)
+
+    ts:Create(sealText, FADE_FAST, { TextTransparency = 0 }):Play()
+    ts:Create(devBox, FADE_FAST, { BackgroundTransparency = 0 }):Play()
+    ts:Create(devText, FADE_FAST, { TextTransparency = 0 }):Play()
+    ts:Create(author, FADE_FAST, { TextTransparency = 0.2 }):Play()
+
+    local pulseConn = rs.Heartbeat:Connect(function()
+        if not loadingActive then return end
+        local t = tick()
+        local scale = 1 + math.sin(t * 2) * 0.03
+        logoImage.Size = UDim2.new(0, 150 * scale, 0, 150 * scale)
+    end)
+    table.insert(loadingConnections, pulseConn)
 end
 
 if _G.SealDevV27Loaded then
     warn("[SealDev] Already loaded. Set _G.SealDevV27Loaded = nil to reload")
-    hideLoadingGui()
+    finishLoading()
     return
 end
 _G.SealDevV27Loaded = true
@@ -111,7 +268,7 @@ local ok, UI = pcall(function()
 end)
 if not ok or not UI then
     warn("[SealDev] WindUI load failed:", UI)
-    hideLoadingGui()
+    finishLoading()
     return
 end
 
@@ -129,7 +286,7 @@ do
     if not ok2 or not res then
         warn("[SealDev] CreateWindow failed:", res)
         _G.SealDevV27Loaded = nil
-        hideLoadingGui()
+        finishLoading()
         return
     end
     Hub = res
@@ -266,24 +423,16 @@ local function EquipTool(t)
     if h and h.Health > 0 then pcall(function() h:EquipTool(t) end) end
 end
 
-local RemoteFolder = RS:WaitForChild("Remotes", 10)
-
-local lastThrown = {}
-local THROW_COOLDOWN = 0.06
-
-local function ThrowKnife(tb)
-    local r = tb and tb:FindFirstChild("HumanoidRootPart")
-    if not r then return end
-    local plr = PlayersService:GetPlayerFromCharacter(tb)
-    if plr then
-        local last = lastThrown[plr]
-        if last and tick() - last < THROW_COOLDOWN then return end
-        lastThrown[plr] = tick()
-    end
-    local rem = RemoteFolder and RemoteFolder:FindFirstChild("ThrowHit")
-    if not rem then return end
-    pcall(function() rem:FireServer(r, r.Position) end)
+local function equipGun()
+    local char = MyPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+    local gun = FindGun()
+    if gun then pcall(function() hum:EquipTool(gun) end) end
 end
+
+local RemoteFolder = RS:WaitForChild("Remotes", 10)
 
 local BulletRendererColor = Color3.fromRGB(255, 255, 255)
 
@@ -336,42 +485,6 @@ local function CharacterRayOrigin(char)
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
     return (hrp.CFrame * CFrame.new(0, 0, hrp.Size.Z / 2)).Position
-end
-
-local GUN_KILL_COOLDOWN = 0.06
-local GUN_KILL_INTERVAL = 0.015
-local lastGunShot = {}
-
-local function ShootGunKill(target)
-    if not target or not target.Character then return end
-    local myChar = MyPlayer.Character
-    if not myChar then return end
-    local origin = CharacterRayOrigin(myChar)
-    if not origin then return end
-
-    local hitPart = target.Character:FindFirstChild("Head")
-                 or target.Character:FindFirstChild("HumanoidRootPart")
-    if not hitPart then return end
-
-    local tool = FindGun()
-    if not tool then return end
-
-    local targetPos = hitPart.Position
-    local muzzle = tool:FindFirstChild("Muzzle", true)
-    local startPos = muzzle and muzzle.WorldPosition or origin
-
-    BulletRenderer(startPos, targetPos)
-
-    local sg = RemoteFolder and RemoteFolder:FindFirstChild("ShootGun")
-    if not sg then return end
-    pcall(function()
-        sg:FireServer(origin, targetPos, hitPart, targetPos)
-    end)
-
-    local sound = tool:FindFirstChild("Fire")
-    if sound and sound:IsA("Sound") then
-        pcall(function() sound:Play() end)
-    end
 end
 
 local function hasClearLOS(fromPart, targetChar)
@@ -541,8 +654,6 @@ end)
 
 MyPlayer.CharacterAdded:Connect(function(body)
     S.CachedKnife = nil
-    lastThrown = {}
-    lastGunShot = {}
     SavedState.WalkSpeed = nil
     SavedState.JumpPower = nil
     SavedState.JumpHeight = nil
@@ -1196,14 +1307,17 @@ end)
 local KillPage = Hub:Tab({ Title = "Kill All", Icon = "skull", Locked = false })
 
 local GunSection = KillPage:Section({ Title = "Gun", Opened = true })
-local KnifeSection = KillPage:Section({ Title = "Knife", Opened = true })
+
+local GUN_KILL_COOLDOWN = 0.06
+local GUN_KILL_INTERVAL = 0.015
 
 local gunKillOn = false
-local lastGunShot = {}
+lastGunShot = {}
 
 local function killAllWithGunOnce()
     if not S.InMatch then Notify("Not in match") return end
     if not FindGun() then Notify("No gun in inventory!") return end
+    equipGun()
     lastGunShot = {}
     local targets = {}
     for _, o in ipairs(PlayersService:GetPlayers()) do
@@ -1215,7 +1329,16 @@ local function killAllWithGunOnce()
         end
     end
     for _, plr in ipairs(targets) do
-        ShootGunKill(plr)
+        local target = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+        local origin = MyPlayer.Character and MyPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if origin and target then
+            local sg = RemoteFolder and RemoteFolder:FindFirstChild("ShootGun")
+            if sg then
+                pcall(function()
+                    sg:FireServer(origin.Position, target.Position, target, target.Position)
+                end)
+            end
+        end
     end
     Notify("Gun burst sent (" .. #targets .. ")")
 end
@@ -1227,6 +1350,7 @@ GunSection:Button({
 
 GunSection:Toggle({
     Title = "Auto kill players (Gun)",
+    Desc = "Fast mode - kills every enemy at 0.015s",
     Default = false,
     Callback = function(v)
         gunKillOn = v
@@ -1235,19 +1359,26 @@ GunSection:Toggle({
             task.spawn(function()
                 while gunKillOn do
                     if S.InMatch and not S.GuiHidden then
-                        local tool = FindGun()
-                        if tool then
-                            local myChar = MyPlayer.Character
-                            if myChar and not myChar:FindFirstChildOfClass("Tool") then
-                                EquipTool(tool)
-                            end
+                        equipGun()
+                        local origin = MyPlayer.Character and MyPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if origin then
                             for _, o in ipairs(S.EnemyList) do
                                 if not isTeammate(o) then
                                     local c = o.Character
                                     if c then
                                         local h = c:FindFirstChildOfClass("Humanoid")
-                                        if h and h.Health > 0 then
-                                            ShootGunKill(o)
+                                        local target = c:FindFirstChild("HumanoidRootPart")
+                                        if h and h.Health > 0 and target then
+                                            local last = lastGunShot[o]
+                                            if not last or tick() - last >= GUN_KILL_COOLDOWN then
+                                                lastGunShot[o] = tick()
+                                                local sg = RemoteFolder and RemoteFolder:FindFirstChild("ShootGun")
+                                                if sg then
+                                                    pcall(function()
+                                                        sg:FireServer(origin.Position, target.Position, target, target.Position)
+                                                    end)
+                                                end
+                                            end
                                         end
                                     end
                                 end
@@ -1257,70 +1388,9 @@ GunSection:Toggle({
                     task.wait(GUN_KILL_INTERVAL)
                 end
             end)
-            Notify("Auto Gun Kill ON")
+            Notify("Auto Gun Kill ON (fast 0.015s)")
         else
             Notify("Auto Gun Kill OFF")
-        end
-    end,
-})
-
-local knifeKillOn = false
-local KNIFE_KILL_INTERVAL = 0.015
-
-local function killAllWithKnifeOnce()
-    if not S.InMatch then Notify("Not in match") return end
-    EquipTool(FindKnife())
-    lastThrown = {}
-    local targets = {}
-    for _, o in ipairs(PlayersService:GetPlayers()) do
-        if o ~= MyPlayer and not isTeammate(o) and o.Character then
-            local h = o.Character:FindFirstChildOfClass("Humanoid")
-            if h and h.Health > 0 then targets[#targets + 1] = o.Character end
-        end
-    end
-    for _, char in ipairs(targets) do
-        ThrowKnife(char)
-    end
-    Notify("Knife burst sent (" .. #targets .. ")")
-end
-
-KnifeSection:Button({
-    Title = "Kill all players once",
-    Callback = function() killAllWithKnifeOnce() end,
-})
-
-KnifeSection:Toggle({
-    Title = "Auto kill players (Knife)",
-    Default = false,
-    Callback = function(v)
-        knifeKillOn = v
-        if v then
-            lastThrown = {}
-            task.spawn(function()
-                while knifeKillOn do
-                    if S.InMatch and not S.GuiHidden then
-                        local knife = FindKnife()
-                        if knife and knife.Parent ~= MyPlayer.Character then
-                            EquipTool(knife)
-                        end
-                        for _, o in ipairs(S.EnemyList) do
-                            if not isTeammate(o) then
-                                local c = o.Character
-                                if c then
-                                    local h = c:FindFirstChildOfClass("Humanoid")
-                                    if h and h.Health > 0 then
-                                        ThrowKnife(c)
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    task.wait(KNIFE_KILL_INTERVAL)
-                end
-            end)
-            Notify("Auto Knife Kill ON")
-        else
-            Notify("Auto Knife Kill OFF")
         end
     end,
 })
@@ -1475,7 +1545,15 @@ task.spawn(function()
                         if c then
                             local h = c:FindFirstChildOfClass("Humanoid")
                             if h and h.Health > 0 then
-                                ThrowKnife(c)
+                                local target = c:FindFirstChild("HumanoidRootPart")
+                                if target then
+                                    local knifeRemote = RemoteFolder and RemoteFolder:FindFirstChild("ThrowHit")
+                                    if knifeRemote then
+                                        pcall(function()
+                                            knifeRemote:FireServer(target, target.Position)
+                                        end)
+                                    end
+                                end
                             end
                         end
                     end
@@ -2044,7 +2122,6 @@ pcall(function()
     Hub:OnDestroy(function()
         _G.SealDevV27Loaded = nil
         gunKillOn = false
-        knifeKillOn = false
         S.FarmOn = false
         S.SpeedOn = false
         S.NoclipOn = false
@@ -2100,7 +2177,7 @@ pcall(function()
     UI:SetTheme("sealdev")
 end)
 
-hideLoadingGui()
+finishLoading()
 
 dbg("ready")
-Notify("seal is le goat it took me 2 days to make this script 🦭💀💀😮😭💦🤔👍")
+Notify("seal is le goat it took me 2132312 days to make this script 🦭💀💀😮😭💦🤔👍")
