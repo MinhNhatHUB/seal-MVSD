@@ -357,7 +357,7 @@ UIStroke.Transparency = 0.4
 UIStroke.Parent = ImageButton
 
 ImageButton.MouseButton1Click:Connect(function()
-    Hub:ToggleKey()
+    Hub:SetToggleKey(Enum.KeyCode.LeftControl)
 end)
 
 ImageButton.MouseEnter:Connect(function()
