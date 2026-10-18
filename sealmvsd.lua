@@ -260,8 +260,7 @@ pcall(function()
     end
 end)
 
-local LOGO = "rbxassetid://131261307870420"
-local DISCORD_LINK = "https://discord.gg/xhn6WaHzs5"
+local LOGO = "rbxassetid://113191664721910"
 
 local ok, UI = pcall(function()
     return loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
@@ -320,6 +319,63 @@ local DANCE_R15 = "rbxassetid://507776879"
 local DANCE_R6  = "rbxassetid://182435998"
 local FLAGS_MULTIPLIER = 4.5
 local JUMP_SOUND_NEW   = "rbxassetid://2428506580"
+
+local ToggleMenuBtn = Instance.new("ScreenGui")
+ToggleMenuBtn.Name = "MinhNhatHUBToggleBtn"
+ToggleMenuBtn.ResetOnSpawn = false
+ToggleMenuBtn.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ToggleMenuBtn.Parent = Player:WaitForChild("PlayerGui")
+
+local ImageButton = Instance.new("ImageButton")
+ImageButton.Name = "MenuToggle"
+ImageButton.Size = UDim2.new(0, 50, 0, 50)
+ImageButton.Position = UDim2.new(0, 20, 0.5, -25)
+ImageButton.BackgroundColor3 = Color3.fromRGB(124, 92, 255)
+ImageButton.BackgroundTransparency = 0.2
+ImageButton.Image = "rbxassetid://113191664721910"
+ImageButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
+ImageButton.ImageTransparency = 0
+ImageButton.ScaleType = Enum.ScaleType.Fit
+ImageButton.BorderSizePixel = 0
+ImageButton.AutoButtonColor = true
+ImageButton.Active = true
+ImageButton.Draggable = true
+ImageButton.Parent = ToggleMenuBtn
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = ImageButton
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(226, 240, 253)
+UIStroke.Thickness = 1.5
+UIStroke.Transparency = 0.4
+UIStroke.Parent = ImageButton
+
+local isMenuOpen = true
+
+ImageButton.MouseButton1Click:Connect(function()
+    isMenuOpen = not isMenuOpen
+    if isMenuOpen then
+        if Window.Unminimize then Window:Unminimize() end
+        ImageButton.BackgroundColor3 = Color3.fromRGB(124, 92, 255)
+    else
+        if Window.Minimize then Window:Minimize() end
+        ImageButton.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    end
+end)
+
+ImageButton.MouseEnter:Connect(function()
+    TweenService:Create(ImageButton, TweenInfo.new(0.15), {
+        Size = UDim2.new(0, 55, 0, 55)
+    }):Play()
+end)
+
+ImageButton.MouseLeave:Connect(function()
+    TweenService:Create(ImageButton, TweenInfo.new(0.15), {
+        Size = UDim2.new(0, 50, 0, 50)
+    }):Play()
+end)
 
 local DEFAULT_WALKSPEED = 32
 
