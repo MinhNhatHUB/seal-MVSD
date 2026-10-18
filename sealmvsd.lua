@@ -357,8 +357,7 @@ UIStroke.Transparency = 0.4
 UIStroke.Parent = ImageButton
 
 ImageButton.MouseButton1Click:Connect(function()
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.LeftControl, false, game)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.LeftControl, false, game)
+    Hub:ToggleKey()
 end)
 
 ImageButton.MouseEnter:Connect(function()
