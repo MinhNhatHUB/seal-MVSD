@@ -356,17 +356,8 @@ UIStroke.Thickness = 1.5
 UIStroke.Transparency = 0.4
 UIStroke.Parent = ImageButton
 
-local isMenuOpen = true
-
 ImageButton.MouseButton1Click:Connect(function()
-    isMenuOpen = not isMenuOpen
-    if isMenuOpen then
-        if Hub.Unminimize then Hub:Unminimize() end 
-        ImageButton.BackgroundColor3 = Color3.fromRGB(124, 92, 255)
-    else
-        if Hub.Minimize then Hub:Minimize() end 
-        ImageButton.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-    end
+    UI:ToggleKey()
 end)
 
 ImageButton.MouseEnter:Connect(function()
