@@ -36,6 +36,8 @@ local function finishLoading()
         for _, conn in ipairs(loadingConnections) do
             if typeof(conn) == "RBXScriptConnection" then
                 pcall(function() conn:Disconnect() end)
+            elseif typeof(conn) == "thread" then
+                pcall(task.cancel, conn)
             end
         end
         loadingConnections = {}
@@ -291,6 +293,8 @@ do
     Hub = res
 end
 
+finishLoading() 
+
 pcall(function()
     Hub:EditOpenButton({
         Title = "Open SealDev", Icon = LOGO, CornerRadius = UDim.new(0, 10),
@@ -324,7 +328,7 @@ local ToggleMenuBtn = Instance.new("ScreenGui")
 ToggleMenuBtn.Name = "MinhNhatHUBToggleBtn"
 ToggleMenuBtn.ResetOnSpawn = false
 ToggleMenuBtn.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ToggleMenuBtn.Parent = Player:WaitForChild("PlayerGui")
+ToggleMenuBtn.Parent = MyPlayer:WaitForChild("PlayerGui")
 
 local ImageButton = Instance.new("ImageButton")
 ImageButton.Name = "MenuToggle"
@@ -357,22 +361,22 @@ local isMenuOpen = true
 ImageButton.MouseButton1Click:Connect(function()
     isMenuOpen = not isMenuOpen
     if isMenuOpen then
-        if Window.Unminimize then Window:Unminimize() end
+        if Hub.Unminimize then Hub:Unminimize() end 
         ImageButton.BackgroundColor3 = Color3.fromRGB(124, 92, 255)
     else
-        if Window.Minimize then Window:Minimize() end
+        if Hub.Minimize then Hub:Minimize() end 
         ImageButton.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
     end
 end)
 
 ImageButton.MouseEnter:Connect(function()
-    TweenService:Create(ImageButton, TweenInfo.new(0.15), {
+    TweenServiceRef:Create(ImageButton, TweenInfo.new(0.15), { 
         Size = UDim2.new(0, 55, 0, 55)
     }):Play()
 end)
 
 ImageButton.MouseLeave:Connect(function()
-    TweenService:Create(ImageButton, TweenInfo.new(0.15), {
+    TweenServiceRef:Create(ImageButton, TweenInfo.new(0.15), { 
         Size = UDim2.new(0, 50, 0, 50)
     }):Play()
 end)
